@@ -19,6 +19,7 @@ from comps.cores.proto.docarray import LLMParams, RerankerParms, RetrieverParms
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 from langchain_core.prompts import PromptTemplate
+from comps import CustomLogger
 
 
 class ChatTemplate:
@@ -59,8 +60,16 @@ LLM_SERVER_HOST_IP = os.getenv("LLM_SERVER_HOST_IP", "0.0.0.0")
 LLM_SERVER_PORT = int(os.getenv("LLM_SERVER_PORT", 80))
 LLM_MODEL = os.getenv("LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
 
+logger = CustomLogger("opea_chatqna_megaservice_sg")
+logflag = os.getenv("LOGFLAG", False)
 
 def align_inputs(self, inputs, cur_node, runtime_graph, llm_parameters_dict, **kwargs):
+    f_name = 'align_inputs'
+    if logflag:
+        logger.info(f'{f_name}:: cur_node={cur_node}')
+        logger.info(f'{f_name}:: service_type={self.services[cur_node].service_type}')
+        logger.info(f'{f_name}:: inputs={inputs}')
+
     if self.services[cur_node].service_type == ServiceType.EMBEDDING:
         inputs["inputs"] = inputs["text"]
         del inputs["text"]
@@ -82,10 +91,21 @@ def align_inputs(self, inputs, cur_node, runtime_graph, llm_parameters_dict, **k
         # next_inputs["repetition_penalty"] = inputs["repetition_penalty"]
         next_inputs["temperature"] = inputs["temperature"]
         inputs = next_inputs
+
+    if logflag:
+        logger.info(f'{f_name}:: inputs (at end)={inputs}')
+
     return inputs
 
 
 def align_outputs(self, data, cur_node, inputs, runtime_graph, llm_parameters_dict, **kwargs):
+    f_name = 'align_outputs'
+    if logflag:
+        logger.info(f'{f_name}:: cur_node={cur_node}')
+        logger.info(f'{f_name}:: data={data}')
+        logger.info(f'{f_name}:: inputs={inputs}')
+        logger.info(f'{f_name}:: type(data)={type(data)}')
+
     next_data = {}
     if self.services[cur_node].service_type == ServiceType.EMBEDDING:
         assert isinstance(data, list)
@@ -166,10 +186,16 @@ def align_outputs(self, data, cur_node, inputs, runtime_graph, llm_parameters_di
     else:
         next_data = data
 
+    if logflag:
+        logger.info(f'{f_name}:: next_data(end)={next_data}')
+
     return next_data
 
 
 def align_generator(self, gen, **kwargs):
+    if logflag:
+        logger.info(f'align_generator:: gen={gen}')
+
     # OpenAI response format
     # b'data:{"id":"","object":"text_completion","created":1725530204,"model":"meta-llama/Meta-Llama-3-8B-Instruct","system_fingerprint":"2.0.1-native","choices":[{"index":0,"delta":{"role":"assistant","content":"?"},"logprobs":null,"finish_reason":null}]}\n\n'
     for line in gen:
@@ -248,6 +274,14 @@ class ChatQnAService:
         self.megaservice.flow_to(retriever, rerank)
         self.megaservice.flow_to(rerank, llm)
 
+        if logflag:
+            f_name = 'add_remote_service'
+            logger.info(f'{f_name}:: megaservice={self.megaservice}')
+            logger.info(f'{f_name}:: embedding={embedding}')
+            logger.info(f'{f_name}:: retriever={retriever}')
+            logger.info(f'{f_name}:: rerank={rerank}')
+            logger.info(f'{f_name}:: llm={llm}')
+
     def add_remote_service_without_rerank(self):
 
         embedding = MicroService(
@@ -279,6 +313,14 @@ class ChatQnAService:
         self.megaservice.add(embedding).add(retriever).add(llm)
         self.megaservice.flow_to(embedding, retriever)
         self.megaservice.flow_to(retriever, llm)
+
+        if logflag:
+            f_name = 'add_remote_service_without_rerank'
+            logger.info(f'{f_name}:: megaservice={self.megaservice}')
+            logger.info(f'{f_name}:: embedding={embedding}')
+            logger.info(f'{f_name}:: retriever={retriever}')
+            logger.info(f'{f_name}:: llm={llm}')
+
 
     def add_remote_service_with_guardrails(self):
         guardrail_in = MicroService(
@@ -381,9 +423,19 @@ class ChatQnAService:
 
     async def handle_request(self, request: Request):
         data = await request.json()
+
+        f_name = 'handle_request'
+        if logflag:
+            logger.info(f'{f_name}:: request data={data}')
+
         stream_opt = data.get("stream", True)
         chat_request = ChatCompletionRequest.parse_obj(data)
         prompt = handle_message(chat_request.messages)
+
+        if logflag:
+            logger.info(f'{f_name}:: chat_request={chat_request}')
+            logger.info(f'{f_name}:: prompt={prompt}')
+
         parameters = LLMParams(
             max_tokens=chat_request.max_tokens if chat_request.max_tokens else 1024,
             top_k=chat_request.top_k if chat_request.top_k else 10,
@@ -407,6 +459,12 @@ class ChatQnAService:
         reranker_parameters = RerankerParms(
             top_n=chat_request.top_n if chat_request.top_n else 1,
         )
+
+        if logflag:
+            logger.info(f'{f_name}:: scheduling with params. llm_params={parameters},')
+            logger.info(f'{f_name}:: scheduling with params. retriever_params={retriever_parameters}')
+            logger.info(f'{f_name}:: scheduling with params. reranker_params={reranker_parameters}')
+
         result_dict, runtime_graph = await self.megaservice.schedule(
             initial_inputs={"text": prompt},
             llm_parameters=parameters,
@@ -442,6 +500,11 @@ class ChatQnAService:
         )
 
         self.service.add_route(self.endpoint, self.handle_request, methods=["POST"])
+
+        if logflag:
+            f_name = 'start'
+            logger.info(f'{f_name}:: endpoint={self.endpoint}')
+            logger.info(f'{f_name}:: service={self.service}')
 
         self.service.start()
 

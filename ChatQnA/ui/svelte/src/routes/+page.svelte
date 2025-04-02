@@ -107,7 +107,8 @@
 			const eventSource = await fetchTextStream(query);
 			eventSource.addEventListener("error", (e: any) => {
 				if (e.type === "error") {
-					showNotification("Failed to load chat content.", "error");
+					console.log(`error: ${e}`)
+					showNotification("SG:: fetchTextStream:: Failed to load chat content. Error=" + e, "error");
 					loading = false;
 				}
 			});
@@ -174,7 +175,8 @@
 
 			eventSource.stream();
 		} catch (error: any) {
-			showNotification("Failed to load chat content.", "error");
+			console.log(`error: ${e}`)
+			showNotification("SG:: fetchTextStream:: Failed to load chat content. Error=" + e, "error");
 			loading = false;
 		}
 	};
